@@ -17,6 +17,11 @@ var ErrArticleNotFound = errors.New("article not found")
 type Service interface {
 	GetArticleBySlug(ctx context.Context, slug string) (*FrontMatter, []byte, error)
 }
+
+type Store interface {
+	GetArticleBySlug(ctx context.Context, slug string) ([]byte, error)
+}
+
 type Handler struct {
 	logger *slog.Logger
 	svc    Service
@@ -65,7 +70,7 @@ func (h *Handler) GetArticleBySlug() http.HandlerFunc {
 				return
 			}
 			h.logger.InfoContext(r.Context(), "failed to get article", "slug", slug, "err", err)
-			http.Error(w, "failed to get article", http.StatusInternalServerError)
+			http.Error(w, "ailed to get article", http.StatusInternalServerError)
 			return
 		}
 
