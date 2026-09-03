@@ -3,8 +3,10 @@ package blog
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/felixge/httpsnoop"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -13,12 +15,22 @@ import (
 var ErrArticleNotFound = errors.New("article not found")
 
 type Service interface {
-	GetArticleBySlug(ctx context.Context, slug string) ([]byte, error)
+	GetArticleBySlug(ctx context.Context, slug string) (*FrontMatter, []byte, error)
 }
 type Handler struct {
 	logger *slog.Logger
 	svc    Service
 	http.Handler
+}
+
+type FrontMatter struct {
+	Title       string
+	Slug        string
+	Description string
+	Tags        []string
+	Author      string
+	PublishedAt time.Time
+	UpdatedAt   time.Time
 }
 
 func NewHandler(logger *slog.Logger, svc Service) (*Handler, error) {
@@ -46,7 +58,7 @@ func (h *Handler) GetArticleBySlug() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		slug := r.PathValue("slug")
 
-		article, err := h.svc.GetArticleBySlug(r.Context(), slug)
+		fm, content, err := h.svc.GetArticleBySlug(r.Context(), slug)
 		if err != nil {
 			if errors.Is(err, ErrArticleNotFound) {
 				http.Error(w, "article not found", http.StatusNotFound)
@@ -58,8 +70,10 @@ func (h *Handler) GetArticleBySlug() http.HandlerFunc {
 		}
 
 		// Implement the logic to get the article by slug here
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		w.Write(article)
+		w.Write([]byte(fmt.Sprintf("%+v", fm)))
+		w.Write(content)
 	}
 }
 
