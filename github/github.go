@@ -1,3 +1,4 @@
+// Package github provides a GitHub Contents API implementation of blog.Store.
 package github
 
 import (
@@ -21,6 +22,7 @@ import (
 
 const tracerName = "github.com/mchipperfield/blog/github"
 
+// NewService creates a GitHub-backed article store for user and repo.
 func NewService(user, repo string, opts ...Option) (*Service, error) {
 	if user == "" {
 		return nil, fmt.Errorf("user cannot be empty")
@@ -44,8 +46,10 @@ func NewService(user, repo string, opts ...Option) (*Service, error) {
 	return svc, nil
 }
 
+// Option configures a Service during construction.
 type Option func(*Service) error
 
+// WithToken configures the GitHub token used to authenticate API requests.
 func WithToken(token string) Option {
 	return func(s *Service) error {
 		if token == "" {
@@ -56,6 +60,8 @@ func WithToken(token string) Option {
 	}
 }
 
+// WithArticlePath configures the repository-relative directory containing
+// article files. An empty path explicitly selects the repository root.
 func WithArticlePath(articlePath string) Option {
 	return func(s *Service) error {
 		cleanedPath := path.Clean(articlePath)
@@ -72,6 +78,7 @@ func WithArticlePath(articlePath string) Option {
 	}
 }
 
+// Service retrieves Markdown articles through the GitHub Contents API.
 type Service struct {
 	client      *http.Client
 	user        string
@@ -80,6 +87,8 @@ type Service struct {
 	articlePath string
 }
 
+// GetArticleBySlug returns the raw Markdown file named <slug>.md from the
+// configured article directory.
 func (s *Service) GetArticleBySlug(ctx context.Context, slug string) ([]byte, error) {
 	tracer := otel.Tracer(tracerName)
 	tracerCtx, span := tracer.Start(ctx, "article.getbyslug")
@@ -145,6 +154,8 @@ func (s *Service) GetArticleBySlug(ctx context.Context, slug string) ([]byte, er
 	return content, nil
 }
 
+// ListArticles returns Markdown filenames from the configured article
+// directory. Subdirectories are not traversed.
 func (s *Service) ListArticles(ctx context.Context) ([]string, error) {
 	tracer := otel.Tracer(tracerName)
 	ctx, span := tracer.Start(ctx, "article.list")
@@ -155,7 +166,7 @@ func (s *Service) ListArticles(ctx context.Context) ([]string, error) {
 	)
 	defer span.End()
 
-	// 1. List directory contents from GitHub
+	// 1. List the configured article directory through the GitHub Contents API.
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
@@ -211,7 +222,7 @@ func (s *Service) ListArticles(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("github: decode directory: %w", err)
 	}
 
-	// 2. Filter for .md files
+	// 2. Keep only Markdown files; nested directories are deliberately ignored.
 	var markdownFiles []string
 	for _, e := range entries {
 		if e.Type == "file" && strings.HasSuffix(e.Name, ".md") {

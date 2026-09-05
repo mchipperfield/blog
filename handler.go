@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
+// Handler serves the blog index and article pages over HTTP.
 type Handler struct {
 	logger *slog.Logger
 	svc    Service
@@ -18,6 +19,8 @@ type Handler struct {
 	http.Handler
 }
 
+// NewHandler creates a handler for GET /blog and GET /blog/{slug}. The template
+// set must define "index" and "article" templates.
 func NewHandler(logger *slog.Logger, svc Service, tpl *template.Template) (*Handler, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -48,7 +51,7 @@ func NewHandler(logger *slog.Logger, svc Service, tpl *template.Template) (*Hand
 	return h, nil
 }
 
-// GET /blog/{slug}
+// GetArticleBySlug handles GET /blog/{slug} and renders the "article" template.
 func (h *Handler) GetArticleBySlug() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		slug := r.PathValue("slug")
@@ -87,7 +90,7 @@ func (h *Handler) GetArticleBySlug() http.HandlerFunc {
 	}
 }
 
-// GET /blog
+// GetArticles handles GET /blog and renders the "index" template.
 func (h *Handler) GetArticles() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		articles, err := h.svc.ListArticles(r.Context())
@@ -120,6 +123,8 @@ func (h *Handler) GetArticles() http.HandlerFunc {
 	}
 }
 
+// LoggingMw records method, path, peer, protocol, duration, and response status
+// after each request completes.
 func (h *Handler) LoggingMw(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
