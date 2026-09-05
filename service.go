@@ -56,16 +56,23 @@ func (s *service) ListArticles(ctx context.Context) ([]*Frontmatter, error) {
 	if err != nil {
 		return nil, err
 	}
-	frontMatters := make([]*Frontmatter, len(articles))
-	for i, name := range articles {
+	frontMatters := make([]*Frontmatter, 0, len(articles))
+	for _, name := range articles {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("blog: list articles: %w", err)
+		}
+
 		article, err := s.store.GetArticleBySlug(ctx, strings.TrimSuffix(name, ".md"))
 		if err != nil {
 			continue
 		}
 		var fm Frontmatter
-		frontmatter.Parse(bytes.NewReader(article), &fm)
+		_, err = frontmatter.Parse(bytes.NewReader(article), &fm)
+		if err != nil {
+			continue
+		}
 		fm.Slug = strings.TrimSuffix(name, ".md")
-		frontMatters[i] = &fm
+		frontMatters = append(frontMatters, &fm)
 	}
 	return frontMatters, nil
 }
