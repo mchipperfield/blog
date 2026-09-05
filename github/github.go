@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -18,8 +20,6 @@ import (
 )
 
 const tracerName = "github.com/mchipperfield/blog/github"
-
-type Option func(*Service) error
 
 func NewService(user, repo string, opts ...Option) (*Service, error) {
 	if user == "" {
@@ -43,6 +43,9 @@ func NewService(user, repo string, opts ...Option) (*Service, error) {
 	}
 	return svc, nil
 }
+
+type Option func(*Service) error
+
 func WithToken(token string) Option {
 	return func(s *Service) error {
 		if token == "" {
@@ -53,11 +56,28 @@ func WithToken(token string) Option {
 	}
 }
 
+func WithArticlePath(articlePath string) Option {
+	return func(s *Service) error {
+		cleanedPath := path.Clean(articlePath)
+		if cleanedPath == "." {
+			cleanedPath = ""
+		}
+		if path.IsAbs(cleanedPath) ||
+			cleanedPath == ".." ||
+			strings.HasPrefix(cleanedPath, "../") {
+			return errors.New("article path must be relative to repository root")
+		}
+		s.articlePath = cleanedPath
+		return nil
+	}
+}
+
 type Service struct {
-	client *http.Client
-	user   string
-	repo   string
-	token  string
+	client      *http.Client
+	user        string
+	repo        string
+	token       string
+	articlePath string
 }
 
 func (s *Service) GetArticleBySlug(ctx context.Context, slug string) ([]byte, error) {
@@ -71,7 +91,8 @@ func (s *Service) GetArticleBySlug(ctx context.Context, slug string) ([]byte, er
 		attribute.String("github.repo", s.repo),
 	)
 
-	req, err := http.NewRequestWithContext(tracerCtx, http.MethodGet, fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s.md", s.user, s.repo, slug), nil)
+	articlePath := path.Join(s.articlePath, slug+".md")
+	req, err := http.NewRequestWithContext(tracerCtx, http.MethodGet, fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s", url.PathEscape(s.user), url.PathEscape(s.repo), url.PathEscape(articlePath)), nil)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "create http request failed")
@@ -138,7 +159,7 @@ func (s *Service) ListArticles(ctx context.Context) ([]string, error) {
 	req, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodGet,
-		fmt.Sprintf("https://api.github.com/repos/%s/%s/contents", s.user, s.repo),
+		fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s", url.PathEscape(s.user), url.PathEscape(s.repo), url.PathEscape(s.articlePath)),
 		nil,
 	)
 	if err != nil {
@@ -194,7 +215,7 @@ func (s *Service) ListArticles(ctx context.Context) ([]string, error) {
 	var markdownFiles []string
 	for _, e := range entries {
 		if e.Type == "file" && strings.HasSuffix(e.Name, ".md") {
-			markdownFiles = append(markdownFiles, e.Path)
+			markdownFiles = append(markdownFiles, e.Name)
 		}
 	}
 
