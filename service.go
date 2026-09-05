@@ -24,7 +24,7 @@ func NewService(store Store) *service {
 	}
 }
 
-func (s *service) GetArticleBySlug(ctx context.Context, slug string) (*FrontMatter, []byte, error) {
+func (s *service) GetArticleBySlug(ctx context.Context, slug string) (*Frontmatter, []byte, error) {
 	tracer := otel.Tracer("github.com/mchipperfield/blog")
 	ctx, span := tracer.Start(ctx, "article.getbyslug")
 	defer span.End()
@@ -37,7 +37,7 @@ func (s *service) GetArticleBySlug(ctx context.Context, slug string) (*FrontMatt
 		return nil, nil, fmt.Errorf("blog: get article by slug %s: %w", slug, err)
 	}
 
-	var fm FrontMatter
+	var fm Frontmatter
 	content, err := frontmatter.Parse(bytes.NewReader(article), &fm)
 	if err != nil {
 		return nil, nil, fmt.Errorf("blog: parse frontmatter: %w", err)
@@ -51,18 +51,18 @@ func (s *service) GetArticleBySlug(ctx context.Context, slug string) (*FrontMatt
 	return &fm, buf.Bytes(), nil
 }
 
-func (s *service) ListArticles(ctx context.Context) ([]*FrontMatter, error) {
+func (s *service) ListArticles(ctx context.Context) ([]*Frontmatter, error) {
 	articles, err := s.store.ListArticles(ctx)
 	if err != nil {
 		return nil, err
 	}
-	frontMatters := make([]*FrontMatter, len(articles))
+	frontMatters := make([]*Frontmatter, len(articles))
 	for i, name := range articles {
 		article, err := s.store.GetArticleBySlug(ctx, strings.TrimSuffix(name, ".md"))
 		if err != nil {
 			continue
 		}
-		var fm FrontMatter
+		var fm Frontmatter
 		frontmatter.Parse(bytes.NewReader(article), &fm)
 		fm.Slug = strings.TrimSuffix(name, ".md")
 		frontMatters[i] = &fm

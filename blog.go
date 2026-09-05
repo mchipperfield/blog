@@ -9,8 +9,8 @@ import (
 var ErrArticleNotFound = errors.New("article not found")
 
 type Service interface {
-	GetArticleBySlug(ctx context.Context, slug string) (*FrontMatter, []byte, error)
-	ListArticles(ctx context.Context) ([]*FrontMatter, error)
+	GetArticleBySlug(ctx context.Context, slug string) (*Frontmatter, []byte, error)
+	ListArticles(ctx context.Context) ([]*Frontmatter, error)
 }
 
 type Store interface {
@@ -18,7 +18,7 @@ type Store interface {
 	ListArticles(ctx context.Context) ([]string, error)
 }
 
-type FrontMatter struct {
+type Frontmatter struct {
 	Title       string
 	Slug        string
 	Description string

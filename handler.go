@@ -2,7 +2,6 @@ package blog
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"html/template"
 	"log/slog"
@@ -61,7 +60,7 @@ func (h *Handler) GetArticleBySlug() http.HandlerFunc {
 
 		var buf bytes.Buffer
 		if err := h.tpl.ExecuteTemplate(&buf, "article", struct {
-			FrontMatter *FrontMatter
+			FrontMatter *Frontmatter
 			Content     template.HTML
 		}{
 			FrontMatter: fm,
@@ -90,12 +89,22 @@ func (h *Handler) GetArticles() http.HandlerFunc {
 			http.Error(w, "failed to get articles", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+		var buf bytes.Buffer
+		if err := h.tpl.ExecuteTemplate(&buf, "index", struct {
+			Articles []*Frontmatter
+		}{
+			Articles: articles,
+		}); err != nil {
+			h.logger.InfoContext(r.Context(), "failed to execute template", "err", err, "template", "index")
+			http.Error(w, "failed to render articles", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(articles)
-		//for _, article := range articles {
-		//	w.Write([]byte(fmt.Sprintf("%+v", article)))
-		//	}
+		if _, err := buf.WriteTo(w); err != nil {
+			h.logger.InfoContext(r.Context(), "failed to write response", "err", err)
+		}
 
 	}
 }
