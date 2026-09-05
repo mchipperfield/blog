@@ -28,6 +28,12 @@ func NewHandler(logger *slog.Logger, svc Service, tpl *template.Template) (*Hand
 	if tpl == nil {
 		return nil, errors.New("template cannot be nil")
 	}
+	if tpl.Lookup("article") == nil {
+		return nil, errors.New("template 'article' not found")
+	}
+	if tpl.Lookup("index") == nil {
+		return nil, errors.New("template 'index' not found")
+	}
 	h := &Handler{
 		logger: logger.With("component", "blog"),
 		svc:    svc,
@@ -59,10 +65,7 @@ func (h *Handler) GetArticleBySlug() http.HandlerFunc {
 		}
 
 		var buf bytes.Buffer
-		if err := h.tpl.ExecuteTemplate(&buf, "article", struct {
-			FrontMatter *Frontmatter
-			Content     template.HTML
-		}{
+		if err := h.tpl.ExecuteTemplate(&buf, "article", ArticleView{
 			FrontMatter: fm,
 			Content:     template.HTML(content),
 		}); err != nil {
@@ -91,9 +94,7 @@ func (h *Handler) GetArticles() http.HandlerFunc {
 		}
 
 		var buf bytes.Buffer
-		if err := h.tpl.ExecuteTemplate(&buf, "index", struct {
-			Articles []*Frontmatter
-		}{
+		if err := h.tpl.ExecuteTemplate(&buf, "index", IndexView{
 			Articles: articles,
 		}); err != nil {
 			h.logger.InfoContext(r.Context(), "failed to execute template", "err", err, "template", "index")

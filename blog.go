@@ -3,6 +3,7 @@ package blog
 import (
 	"context"
 	"errors"
+	"html/template"
 	"time"
 )
 
@@ -26,4 +27,13 @@ type Frontmatter struct {
 	Author      string
 	PublishedAt time.Time
 	UpdatedAt   time.Time
+}
+
+type ArticleView struct {
+	FrontMatter *Frontmatter
+	Content     template.HTML
+}
+
+type IndexView struct {
+	Articles []*Frontmatter
 }
