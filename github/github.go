@@ -19,8 +19,16 @@ import (
 
 const tracerName = "github.com/mchipperfield/blog/github"
 
-func NewService(user, repo string) *Service {
-	return &Service{
+type Option func(*Service) error
+
+func NewService(user, repo string, opts ...Option) (*Service, error) {
+	if user == "" {
+		return nil, fmt.Errorf("user cannot be empty")
+	}
+	if repo == "" {
+		return nil, fmt.Errorf("repo cannot be empty")
+	}
+	svc := &Service{
 		client: &http.Client{
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 			Timeout:   10 * time.Second,
@@ -28,6 +36,21 @@ func NewService(user, repo string) *Service {
 		user:      user,
 		repo:      repo,
 		converter: goldmark.New(),
+	}
+	for _, opt := range opts {
+		if err := opt(svc); err != nil {
+			return nil, fmt.Errorf("github: handler init: %w", err)
+		}
+	}
+	return svc, nil
+}
+func WithToken(token string) Option {
+	return func(s *Service) error {
+		if token == "" {
+			return fmt.Errorf("token cannot be empty")
+		}
+		s.token = token
+		return nil
 	}
 }
 
@@ -70,14 +93,19 @@ func (s *Service) GetArticleBySlug(ctx context.Context, slug string) ([]byte, er
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
-		span.SetStatus(codes.Error, "article not found")
-		return nil, blog.ErrArticleNotFound
-	}
 	if resp.StatusCode != http.StatusOK {
-		span.RecordError(fmt.Errorf("unexpected status code: %d", resp.StatusCode))
-		span.SetStatus(codes.Error, fmt.Sprintf("unexpected status code: %d", resp.StatusCode))
-		return nil, fmt.Errorf("github: unexpected status code: %d", resp.StatusCode)
+		switch resp.StatusCode {
+		case http.StatusNotFound:
+			span.SetStatus(codes.Error, "article not found")
+			return nil, blog.ErrArticleNotFound
+		case http.StatusUnauthorized:
+			span.SetStatus(codes.Error, "unauthorized")
+			return nil, fmt.Errorf("github: unauthorized")
+		default:
+			span.RecordError(fmt.Errorf("unexpected status code: %d", resp.StatusCode))
+			span.SetStatus(codes.Error, fmt.Sprintf("unexpected status code: %d", resp.StatusCode))
+			return nil, fmt.Errorf("github: unexpected status code: %d", resp.StatusCode)
+		}
 	}
 
 	content, err := io.ReadAll(resp.Body)

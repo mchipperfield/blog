@@ -23,10 +23,11 @@ func NewHandler(logger *slog.Logger, svc Service, tpl *template.Template) (*Hand
 	if logger == nil {
 		logger = slog.Default()
 	}
-
 	if svc == nil {
-		logger.Warn("service is nil, some functionality may not work")
-		//return nil, errors.New("service cannot be nil")
+		return nil, errors.New("service cannot be nil")
+	}
+	if tpl == nil {
+		return nil, errors.New("template cannot be nil")
 	}
 	h := &Handler{
 		logger: logger.With("component", "blog"),
@@ -54,7 +55,7 @@ func (h *Handler) GetArticleBySlug() http.HandlerFunc {
 				return
 			}
 			h.logger.InfoContext(r.Context(), "failed to get article", "slug", slug, "err", err)
-			http.Error(w, "ailed to get article", http.StatusInternalServerError)
+			http.Error(w, "failed to get article", http.StatusInternalServerError)
 			return
 		}
 
@@ -89,7 +90,7 @@ func (h *Handler) GetArticles() http.HandlerFunc {
 			http.Error(w, "failed to get articles", http.StatusInternalServerError)
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(articles)
 		//for _, article := range articles {
