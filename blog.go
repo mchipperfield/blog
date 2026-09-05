@@ -28,10 +28,10 @@ type Service interface {
 
 // Store retrieves raw Markdown documents and lists their filenames.
 type Store interface {
-	// GetArticleBySlug returns the raw Markdown document for slug.
-	GetArticleBySlug(ctx context.Context, slug string) ([]byte, error)
-	// ListArticles returns article filenames, including their .md extension.
-	ListArticles(ctx context.Context) ([]string, error)
+	// GetArticleBySlug returns an Article containing the frontmatter and raw Markdown content for the given slug.
+	GetArticleBySlug(ctx context.Context, slug string) (*Article, error)
+	// ListArticles returns article metadata for all available articles.
+	ListArticles(ctx context.Context) ([]*Frontmatter, error)
 }
 
 // Frontmatter contains the metadata extracted from an article document.
@@ -43,6 +43,11 @@ type Frontmatter struct {
 	Author      string
 	PublishedAt time.Time
 	UpdatedAt   time.Time
+}
+
+type Article struct {
+	FrontMatter *Frontmatter
+	Content     []byte
 }
 
 // ArticleView is the data contract for the "article" HTML template. Content is

@@ -2,6 +2,7 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/adrg/frontmatter"
 	"github.com/mchipperfield/blog"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
@@ -155,7 +157,7 @@ func (s *Service) GetFile(ctx context.Context, repo, filePath string) ([]byte, e
 
 // GetArticleBySlug returns the raw Markdown file named <slug>.md from the
 // configured article directory.
-func (s *Service) GetArticleBySlug(ctx context.Context, slug string) ([]byte, error) {
+func (s *Service) GetArticleBySlug(ctx context.Context, slug string) (*blog.Article, error) {
 	tracer := otel.Tracer(tracerName)
 	tracerCtx, span := tracer.Start(ctx, "article.getbyslug")
 	defer span.End()
@@ -167,19 +169,30 @@ func (s *Service) GetArticleBySlug(ctx context.Context, slug string) ([]byte, er
 	)
 
 	articlePath := path.Join(s.articlePath, slug+".md")
-	content, err := s.GetFile(tracerCtx, s.repo, articlePath)
+	markdown, err := s.GetFile(tracerCtx, s.repo, articlePath)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "get file failed")
 		return nil, fmt.Errorf("github: get file: %w", err)
 	}
 
-	return content, nil
+	var fm blog.Frontmatter
+	content, err := frontmatter.Parse(bytes.NewReader(markdown), &fm)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "parse frontmatter failed")
+		return nil, fmt.Errorf("github: parse frontmatter: %w", err)
+	}
+
+	return &blog.Article{
+		FrontMatter: &fm,
+		Content:     content,
+	}, nil
 }
 
 // ListArticles returns Markdown filenames from the configured article
 // directory. Subdirectories are not traversed.
-func (s *Service) ListArticles(ctx context.Context) ([]string, error) {
+func (s *Service) ListArticles(ctx context.Context) ([]*blog.Frontmatter, error) {
 	tracer := otel.Tracer(tracerName)
 	ctx, span := tracer.Start(ctx, "article.list")
 	span.SetAttributes(
@@ -208,13 +221,26 @@ func (s *Service) ListArticles(ctx context.Context) ([]string, error) {
 	}
 
 	// 2. Keep only Markdown files; nested directories are deliberately ignored.
-	var markdownFiles []string
+	var articles []*blog.Frontmatter
 	for _, e := range entries {
 		if e.Type == "file" && strings.HasSuffix(e.Name, ".md") {
-			markdownFiles = append(markdownFiles, e.Name)
+			article, err := s.GetFile(ctx, s.repo, e.Path)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return nil, fmt.Errorf("github: list articles: %w", err)
+				}
+				continue
+			}
+			var fm blog.Frontmatter
+			_, err = frontmatter.Parse(bytes.NewReader(article), &fm)
+			if err != nil {
+				continue
+			}
+			fm.Slug = strings.TrimSuffix(e.Name, ".md")
+			articles = append(articles, &fm)
+
 		}
 	}
-
-	span.SetAttributes(attribute.Int("article.count", len(markdownFiles)))
-	return markdownFiles, nil
+	span.SetAttributes(attribute.Int("article.count", len(articles)))
+	return articles, nil
 }

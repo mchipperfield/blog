@@ -4,10 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"strings"
 
-	"github.com/adrg/frontmatter"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -22,7 +21,7 @@ type service struct {
 func NewService(store Store) *service {
 	return &service{
 		store:     store,
-		converter: goldmark.New(),
+		converter: goldmark.New(goldmark.WithExtensions(extension.GFM)),
 	}
 }
 
@@ -41,18 +40,12 @@ func (s *service) GetArticleBySlug(ctx context.Context, slug string) (*Frontmatt
 		return nil, nil, fmt.Errorf("blog: get article by slug %s: %w", slug, err)
 	}
 
-	var fm Frontmatter
-	content, err := frontmatter.Parse(bytes.NewReader(article), &fm)
-	if err != nil {
-		return nil, nil, fmt.Errorf("blog: parse frontmatter: %w", err)
-	}
-
 	var buf bytes.Buffer
-	if err := s.converter.Convert(content, &buf); err != nil {
+	if err := s.converter.Convert(article.Content, &buf); err != nil {
 		return nil, nil, fmt.Errorf("blog: convert markdown: %w", err)
 	}
 
-	return &fm, buf.Bytes(), nil
+	return article.FrontMatter, buf.Bytes(), nil
 }
 
 // ListArticles returns metadata for every document that can be fetched and
@@ -63,23 +56,5 @@ func (s *service) ListArticles(ctx context.Context) ([]*Frontmatter, error) {
 	if err != nil {
 		return nil, err
 	}
-	frontMatters := make([]*Frontmatter, 0, len(articles))
-	for _, name := range articles {
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("blog: list articles: %w", err)
-		}
-
-		article, err := s.store.GetArticleBySlug(ctx, strings.TrimSuffix(name, ".md"))
-		if err != nil {
-			continue
-		}
-		var fm Frontmatter
-		_, err = frontmatter.Parse(bytes.NewReader(article), &fm)
-		if err != nil {
-			continue
-		}
-		fm.Slug = strings.TrimSuffix(name, ".md")
-		frontMatters = append(frontMatters, &fm)
-	}
-	return frontMatters, nil
+	return articles, nil
 }
