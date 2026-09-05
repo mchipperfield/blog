@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/mchipperfield/blog"
-	"github.com/yuin/goldmark"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -33,9 +32,8 @@ func NewService(user, repo string, opts ...Option) (*Service, error) {
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 			Timeout:   10 * time.Second,
 		},
-		user:      user,
-		repo:      repo,
-		converter: goldmark.New(),
+		user: user,
+		repo: repo,
 	}
 	for _, opt := range opts {
 		if err := opt(svc); err != nil {
@@ -55,11 +53,10 @@ func WithToken(token string) Option {
 }
 
 type Service struct {
-	client    *http.Client
-	user      string
-	repo      string
-	token     string
-	converter goldmark.Markdown
+	client *http.Client
+	user   string
+	repo   string
+	token  string
 }
 
 func (s *Service) GetArticleBySlug(ctx context.Context, slug string) ([]byte, error) {
