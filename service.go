@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/adrg/frontmatter"
 	"github.com/yuin/goldmark"
@@ -30,10 +31,12 @@ func (s *service) GetArticleBySlug(ctx context.Context, slug string) (*FrontMatt
 	span.SetAttributes(
 		attribute.String("article.slug", slug),
 	)
+
 	article, err := s.store.GetArticleBySlug(ctx, slug)
 	if err != nil {
 		return nil, nil, fmt.Errorf("blog: get article by slug %s: %w", slug, err)
 	}
+
 	var fm FrontMatter
 	content, err := frontmatter.Parse(bytes.NewReader(article), &fm)
 	if err != nil {
@@ -46,4 +49,23 @@ func (s *service) GetArticleBySlug(ctx context.Context, slug string) (*FrontMatt
 	}
 
 	return &fm, buf.Bytes(), nil
+}
+
+func (s *service) ListArticles(ctx context.Context) ([]*FrontMatter, error) {
+	articles, err := s.store.ListArticles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	frontMatters := make([]*FrontMatter, len(articles))
+	for i, name := range articles {
+		article, err := s.store.GetArticleBySlug(ctx, strings.TrimSuffix(name, ".md"))
+		if err != nil {
+			continue
+		}
+		var fm FrontMatter
+		frontmatter.Parse(bytes.NewReader(article), &fm)
+		fm.Slug = strings.TrimSuffix(name, ".md")
+		frontMatters[i] = &fm
+	}
+	return frontMatters, nil
 }

@@ -2,9 +2,11 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/mchipperfield/blog"
@@ -86,4 +88,69 @@ func (s *Service) GetArticleBySlug(ctx context.Context, slug string) ([]byte, er
 	}
 
 	return content, nil
+}
+
+func (s *Service) ListArticles(ctx context.Context) ([]string, error) {
+	tracer := otel.Tracer(tracerName)
+	ctx, span := tracer.Start(ctx, "article.list")
+	span.SetAttributes(
+		attribute.String("article.backend", "github"),
+		attribute.String("github.user", s.user),
+		attribute.String("github.repo", s.repo),
+	)
+	defer span.End()
+
+	// 1. List directory contents from GitHub
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		fmt.Sprintf("https://api.github.com/repos/%s/%s/contents", s.user, s.repo),
+		nil,
+	)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "create request failed")
+		return nil, fmt.Errorf("github: list directory: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	if s.token != "" {
+		req.Header.Set("Authorization", "Bearer "+s.token)
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "http request failed")
+		return nil, fmt.Errorf("github: list directory: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		span.RecordError(fmt.Errorf("unexpected status code: %d", resp.StatusCode))
+		span.SetStatus(codes.Error, "unexpected status code")
+		return nil, fmt.Errorf("github: unexpected status code: %d", resp.StatusCode)
+	}
+
+	// Parse JSON response
+	var entries []struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "decode directory failed")
+		return nil, fmt.Errorf("github: decode directory: %w", err)
+	}
+
+	// 2. Filter for .md files
+	var markdownFiles []string
+	for _, e := range entries {
+		if e.Type == "file" && strings.HasSuffix(e.Name, ".md") {
+			markdownFiles = append(markdownFiles, e.Path)
+		}
+	}
+
+	span.SetAttributes(attribute.Int("article.count", len(markdownFiles)))
+	return markdownFiles, nil
 }
