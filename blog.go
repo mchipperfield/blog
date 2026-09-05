@@ -7,7 +7,8 @@ import (
 	"time"
 )
 
-var ErrArticleNotFound = errors.New("article not found")
+var ErrArticleNotFound = errors.New("blog: article not found")
+var ErrServiceUnavailable = errors.New("blog: service unavailable")
 
 type Service interface {
 	GetArticleBySlug(ctx context.Context, slug string) (*Frontmatter, []byte, error)

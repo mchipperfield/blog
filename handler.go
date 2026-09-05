@@ -55,12 +55,16 @@ func (h *Handler) GetArticleBySlug() http.HandlerFunc {
 
 		fm, content, err := h.svc.GetArticleBySlug(r.Context(), slug)
 		if err != nil {
-			if errors.Is(err, ErrArticleNotFound) {
+			switch {
+			case errors.Is(err, ErrArticleNotFound):
 				http.Error(w, "article not found", http.StatusNotFound)
-				return
+			case errors.Is(err, ErrServiceUnavailable):
+				h.logger.InfoContext(r.Context(), "blog service unavailable", "slug", slug, "err", err)
+				http.Error(w, "blog service unavailable", http.StatusServiceUnavailable)
+			default:
+				h.logger.InfoContext(r.Context(), "failed to get article", "slug", slug, "err", err)
+				http.Error(w, "failed to get article", http.StatusInternalServerError)
 			}
-			h.logger.InfoContext(r.Context(), "failed to get article", "slug", slug, "err", err)
-			http.Error(w, "failed to get article", http.StatusInternalServerError)
 			return
 		}
 
@@ -73,7 +77,7 @@ func (h *Handler) GetArticleBySlug() http.HandlerFunc {
 			http.Error(w, "failed to render article", http.StatusInternalServerError)
 			return
 		}
-		// Implement the logic to get the article by slug here
+
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		if _, err := buf.WriteTo(w); err != nil {
@@ -88,8 +92,14 @@ func (h *Handler) GetArticles() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		articles, err := h.svc.ListArticles(r.Context())
 		if err != nil {
-			h.logger.InfoContext(r.Context(), "failed to get articles", "err", err)
-			http.Error(w, "failed to get articles", http.StatusInternalServerError)
+			switch {
+			case errors.Is(err, ErrServiceUnavailable):
+				h.logger.InfoContext(r.Context(), "blog service unavailable", "err", err)
+				http.Error(w, "blog service unavailable", http.StatusServiceUnavailable)
+			default:
+				h.logger.InfoContext(r.Context(), "failed to get articles", "err", err)
+				http.Error(w, "failed to get articles", http.StatusInternalServerError)
+			}
 			return
 		}
 

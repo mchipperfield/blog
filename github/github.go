@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -86,10 +87,18 @@ func (s *Service) GetArticleBySlug(ctx context.Context, slug string) ([]byte, er
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "http request failed")
-		return nil, fmt.Errorf("github: http request: %w", err)
+		if errors.Is(err, context.Canceled) {
+			return nil, fmt.Errorf("github: http request canceled: %w", err)
+		}
+		return nil, fmt.Errorf("github: http request: %w", errors.Join(blog.ErrServiceUnavailable, err))
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= http.StatusInternalServerError {
+		span.RecordError(fmt.Errorf("server error: %d", resp.StatusCode))
+		span.SetStatus(codes.Error, fmt.Sprintf("server error: %d", resp.StatusCode))
+		return nil, fmt.Errorf("github: %w, server error: %d", blog.ErrServiceUnavailable, resp.StatusCode)
+	}
 	if resp.StatusCode != http.StatusOK {
 		switch resp.StatusCode {
 		case http.StatusNotFound:
@@ -146,17 +155,30 @@ func (s *Service) ListArticles(ctx context.Context) ([]string, error) {
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "http request failed")
-		return nil, fmt.Errorf("github: list directory: %w", err)
+		if errors.Is(err, context.Canceled) {
+			return nil, fmt.Errorf("github: http request canceled: %w", err)
+		}
+		return nil, fmt.Errorf("github: http request: %w", errors.Join(blog.ErrServiceUnavailable, err))
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= http.StatusInternalServerError {
+		span.RecordError(fmt.Errorf("server error: %d", resp.StatusCode))
+		span.SetStatus(codes.Error, fmt.Sprintf("server error: %d", resp.StatusCode))
+		return nil, fmt.Errorf("github: %w, server error: %d", blog.ErrServiceUnavailable, resp.StatusCode)
+	}
 	if resp.StatusCode != http.StatusOK {
-		span.RecordError(fmt.Errorf("unexpected status code: %d", resp.StatusCode))
-		span.SetStatus(codes.Error, "unexpected status code")
-		return nil, fmt.Errorf("github: unexpected status code: %d", resp.StatusCode)
+		switch resp.StatusCode {
+		case http.StatusUnauthorized:
+			span.SetStatus(codes.Error, "unauthorized")
+			return nil, fmt.Errorf("github: unauthorized")
+		default:
+			span.RecordError(fmt.Errorf("unexpected status code: %d", resp.StatusCode))
+			span.SetStatus(codes.Error, fmt.Sprintf("unexpected status code: %d", resp.StatusCode))
+			return nil, fmt.Errorf("github: unexpected status code: %d", resp.StatusCode)
+		}
 	}
 
-	// Parse JSON response
 	var entries []struct {
 		Name string `json:"name"`
 		Type string `json:"type"`
