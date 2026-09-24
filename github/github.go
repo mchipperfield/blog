@@ -1,4 +1,4 @@
-// Package github provides a GitHub Contents API implementation of blog.Store.
+// Package github provides a GitHub Contents API implementation of blog.Store for a specific owner and repository.
 package github
 
 import (
@@ -7,38 +7,39 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/url"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/adrg/frontmatter"
 	"github.com/mchipperfield/blog"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 )
 
-const tracerName = "github.com/mchipperfield/blog/github"
+// Service retrieves Markdown articles through the GitHub Contents API using the provided HTTP client.
+type Service struct {
+	client      *Client
+	owner       string
+	repo        string
+	articlePath string
+}
 
-// NewService creates a GitHub-backed article store for user and repo.
-func NewService(user, repo string, opts ...ServiceOption) (*Service, error) {
-	if user == "" {
-		return nil, fmt.Errorf("user cannot be empty")
+// NewService creates a GitHub-backed article store for owner and repo.
+func NewService(client *Client, owner, repo string, opts ...ServiceOption) (*Service, error) {
+	if owner == "" {
+		return nil, errors.New("github: owner cannot be empty")
 	}
 	if repo == "" {
-		return nil, fmt.Errorf("repo cannot be empty")
+		return nil, errors.New("github: repo cannot be empty")
+	}
+	if client == nil {
+		return nil, errors.New("github: client cannot be nil")
 	}
 	svc := &Service{
-		client: &http.Client{
-			Transport: otelhttp.NewTransport(http.DefaultTransport),
-			Timeout:   10 * time.Second,
-		},
-		user: user,
-		repo: repo,
+		client: client,
+		owner:  owner,
+		repo:   repo,
 	}
 	for _, opt := range opts {
 		if err := opt(svc); err != nil {
@@ -50,17 +51,6 @@ func NewService(user, repo string, opts ...ServiceOption) (*Service, error) {
 
 // ServiceOption configures a Service during construction.
 type ServiceOption func(*Service) error
-
-// WithToken configures the GitHub token used to authenticate API requests.
-func WithToken(token string) ServiceOption {
-	return func(s *Service) error {
-		if token == "" {
-			return fmt.Errorf("token cannot be empty")
-		}
-		s.token = token
-		return nil
-	}
-}
 
 // WithArticlePath configures the repository-relative directory containing
 // article files. An empty path explicitly selects the repository root.
@@ -80,81 +70,6 @@ func WithArticlePath(articlePath string) ServiceOption {
 	}
 }
 
-// Service retrieves Markdown articles through the GitHub Contents API.
-type Service struct {
-	client      *http.Client
-	user        string
-	repo        string
-	token       string
-	articlePath string
-}
-
-// GetFile returns a repository-relative file or directory listing from the
-// GitHub Contents API.
-func (s *Service) GetFile(ctx context.Context, repo, filePath string) ([]byte, error) {
-	ctx, span := otel.Tracer(tracerName).Start(ctx, "github.getfile")
-	defer span.End()
-	span.SetAttributes(
-		attribute.String("github.user", s.user),
-		attribute.String("github.repo", repo),
-		attribute.String("github.path", filePath),
-	)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s", url.PathEscape(s.user), url.PathEscape(repo), url.PathEscape(filePath)), nil)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "create http request failed")
-		return nil, fmt.Errorf("github: create http request: %w", err)
-	}
-	if s.token != "" {
-		req.Header.Set("Authorization", "Bearer "+s.token)
-	}
-	req.Header.Set("Accept", "application/vnd.github.raw")
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "http request failed")
-		if errors.Is(err, context.Canceled) {
-			return nil, fmt.Errorf("github: http request canceled: %w", err)
-		}
-		return nil, fmt.Errorf("github: http request: %w", errors.Join(blog.ErrServiceUnavailable, err))
-	}
-	defer resp.Body.Close()
-	span.SetAttributes(attribute.Int("http.response.status_code", resp.StatusCode))
-
-	if resp.StatusCode >= http.StatusInternalServerError {
-		err := fmt.Errorf("server error: %d", resp.StatusCode)
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return nil, fmt.Errorf("github: %w, %w", blog.ErrServiceUnavailable, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		switch resp.StatusCode {
-		case http.StatusNotFound:
-			span.SetStatus(codes.Error, "file not found")
-			return nil, blog.ErrArticleNotFound
-		case http.StatusUnauthorized:
-			span.SetStatus(codes.Error, "unauthorized")
-			return nil, fmt.Errorf("github: unauthorized")
-		default:
-			err := fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return nil, fmt.Errorf("github: %w", err)
-		}
-	}
-
-	content, err := io.ReadAll(resp.Body)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, "read body failed")
-		return nil, fmt.Errorf("github: read response body: %w", err)
-	}
-	span.SetAttributes(attribute.Int("github.response.size", len(content)))
-	return content, nil
-}
-
 // GetArticleBySlug returns the raw Markdown file named <slug>.md from the
 // configured article directory.
 func (s *Service) GetArticleBySlug(ctx context.Context, slug string) (*blog.Article, error) {
@@ -164,19 +79,21 @@ func (s *Service) GetArticleBySlug(ctx context.Context, slug string) (*blog.Arti
 	span.SetAttributes(
 		attribute.String("article.slug", slug),
 		attribute.String("article.backend", "github"),
-		attribute.String("github.user", s.user),
+		attribute.String("github.owner", s.owner),
 		attribute.String("github.repo", s.repo),
 	)
-
+	if !blog.ValidSlug(slug) {
+		return nil, blog.ErrInvalidSlug
+	}
 	articlePath := path.Join(s.articlePath, slug+".md")
-	markdown, err := s.GetFile(tracerCtx, s.repo, articlePath)
+	markdown, err := s.client.GetFile(tracerCtx, s.owner, s.repo, articlePath)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "get file failed")
 		return nil, fmt.Errorf("github: get file: %w", err)
 	}
 
-	var fm blog.Frontmatter
+	var fm blog.Metadata
 	content, err := frontmatter.Parse(bytes.NewReader(markdown), &fm)
 	if err != nil {
 		span.RecordError(err)
@@ -185,24 +102,24 @@ func (s *Service) GetArticleBySlug(ctx context.Context, slug string) (*blog.Arti
 	}
 
 	return &blog.Article{
-		FrontMatter: &fm,
-		Content:     content,
+		Metadata: &fm,
+		Markdown: content,
 	}, nil
 }
 
 // ListArticles returns Markdown filenames from the configured article
 // directory. Subdirectories are not traversed.
-func (s *Service) ListArticles(ctx context.Context) ([]*blog.Frontmatter, error) {
+func (s *Service) ListArticles(ctx context.Context) ([]*blog.Metadata, error) {
 	tracer := otel.Tracer(tracerName)
 	ctx, span := tracer.Start(ctx, "article.list")
 	span.SetAttributes(
 		attribute.String("article.backend", "github"),
-		attribute.String("github.user", s.user),
+		attribute.String("github.owner", s.owner),
 		attribute.String("github.repo", s.repo),
 	)
 	defer span.End()
 
-	content, err := s.GetFile(ctx, s.repo, s.articlePath)
+	content, err := s.client.GetFile(ctx, s.owner, s.repo, s.articlePath)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, "list directory failed")
@@ -221,17 +138,17 @@ func (s *Service) ListArticles(ctx context.Context) ([]*blog.Frontmatter, error)
 	}
 
 	// 2. Keep only Markdown files; nested directories are deliberately ignored.
-	var articles []*blog.Frontmatter
+	var articles []*blog.Metadata
 	for _, e := range entries {
 		if e.Type == "file" && strings.HasSuffix(e.Name, ".md") {
-			article, err := s.GetFile(ctx, s.repo, e.Path)
+			article, err := s.client.GetFile(ctx, s.owner, s.repo, e.Path)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					return nil, fmt.Errorf("github: list articles: %w", err)
 				}
 				continue
 			}
-			var fm blog.Frontmatter
+			var fm blog.Metadata
 			_, err = frontmatter.Parse(bytes.NewReader(article), &fm)
 			if err != nil {
 				continue

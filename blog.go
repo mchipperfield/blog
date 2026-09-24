@@ -5,7 +5,6 @@ package blog
 import (
 	"context"
 	"errors"
-	"html/template"
 	"time"
 )
 
@@ -15,27 +14,31 @@ var (
 	// ErrServiceUnavailable indicates that a required backing service could not
 	// complete the operation.
 	ErrServiceUnavailable = errors.New("blog: service unavailable")
+	// ErrAccessDenied indicates lack of permission to access the requested resource. e.g. no read access.
+	ErrAccessDenied = errors.New("blog: access denied")
+	// ErrInvalidSlug indicates that the provided slug is not valid.
+	ErrInvalidSlug = errors.New("blog: invalid slug")
 )
 
 // Service provides rendered articles and article metadata independently of the
 // backing store and HTTP representation.
 type Service interface {
 	// GetArticleBySlug returns an article's frontmatter and rendered HTML content.
-	GetArticleBySlug(ctx context.Context, slug string) (*Frontmatter, []byte, error)
+	GetArticleBySlug(ctx context.Context, slug string) (*Metadata, []byte, error)
 	// ListArticles returns metadata for the articles that could be loaded.
-	ListArticles(ctx context.Context) ([]*Frontmatter, error)
+	ListArticles(ctx context.Context) ([]*Metadata, error)
 }
 
-// Store retrieves raw Markdown documents and lists their filenames.
+// Store retrieves raw Markdown from a backing store.
 type Store interface {
 	// GetArticleBySlug returns an Article containing the frontmatter and raw Markdown content for the given slug.
 	GetArticleBySlug(ctx context.Context, slug string) (*Article, error)
 	// ListArticles returns article metadata for all available articles.
-	ListArticles(ctx context.Context) ([]*Frontmatter, error)
+	ListArticles(ctx context.Context) ([]*Metadata, error)
 }
 
-// Frontmatter contains the metadata extracted from an article document.
-type Frontmatter struct {
+// Metadata contains the metadata extracted from an article document.
+type Metadata struct {
 	Title       string
 	Slug        string
 	Description string
@@ -46,18 +49,6 @@ type Frontmatter struct {
 }
 
 type Article struct {
-	FrontMatter *Frontmatter
-	Content     []byte
-}
-
-// ArticleView is the data contract for the "article" HTML template. Content is
-// trusted HTML produced by the configured Service.
-type ArticleView struct {
-	FrontMatter *Frontmatter
-	Content     template.HTML
-}
-
-// IndexView is the data contract for the "index" HTML template.
-type IndexView struct {
-	Articles []*Frontmatter
+	Metadata *Metadata
+	Markdown []byte
 }

@@ -19,6 +19,18 @@ type Handler struct {
 	http.Handler
 }
 
+// ArticleView is the data contract for the "article" HTML template. Content is
+// trusted HTML produced by the configured Service.
+type ArticleView struct {
+	Metadata *Metadata
+	Content  template.HTML
+}
+
+// IndexView is the data contract for the "index" HTML template.
+type IndexView struct {
+	Articles []*Metadata
+}
+
 // NewHandler creates a handler for GET /blog and GET /blog/{slug}. The template
 // set must define "index" and "article" templates.
 func NewHandler(logger *slog.Logger, svc Service, tpl *template.Template) (*Handler, error) {
@@ -73,8 +85,8 @@ func (h *Handler) GetArticleBySlug() http.HandlerFunc {
 
 		var buf bytes.Buffer
 		if err := h.tpl.ExecuteTemplate(&buf, "article", ArticleView{
-			FrontMatter: fm,
-			Content:     template.HTML(content),
+			Metadata: fm,
+			Content:  template.HTML(content),
 		}); err != nil {
 			h.logger.InfoContext(r.Context(), "failed to execute template", "slug", slug, "err", err, "template", "article")
 			http.Error(w, "failed to render article", http.StatusInternalServerError)
@@ -139,5 +151,4 @@ func (h *Handler) LoggingMw(next http.Handler) http.Handler {
 			slog.Int("status", m.Code),
 		))
 	})
-
 }
