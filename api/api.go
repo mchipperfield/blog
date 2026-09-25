@@ -33,8 +33,8 @@ func NewHandler(logger *slog.Logger, svc blog.Service) (*Handler, error) {
 		svc:    svc,
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /", h.GetArticles())
 	mux.HandleFunc("GET /{slug}", h.GetArticleBySlug())
+	mux.HandleFunc("GET /{$}", h.GetArticles())
 	h.Handler = h.LoggingMw(mux)
 	h.Handler = otelhttp.NewHandler(h.Handler, "blog-handler")
 	return &h, nil
