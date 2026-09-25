@@ -33,6 +33,7 @@ func NewHandler(logger *slog.Logger, svc blog.Service) (*Handler, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{slug}", h.GetArticleBySlug())
 	mux.HandleFunc("GET /{$}", h.GetArticles())
+	h.Handler = mux
 	return &h, nil
 }
 
