@@ -7,9 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/felixge/httpsnoop"
 	"github.com/mchipperfield/blog"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type Handler struct {
@@ -27,7 +25,7 @@ func NewHandler(logger *slog.Logger, svc blog.Service) (*Handler, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	logger = logger.With("component", "api")
+	logger = logger.With("component", "blog-handler")
 	h := Handler{
 		logger: logger,
 		svc:    svc,
@@ -35,8 +33,6 @@ func NewHandler(logger *slog.Logger, svc blog.Service) (*Handler, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{slug}", h.GetArticleBySlug())
 	mux.HandleFunc("GET /{$}", h.GetArticles())
-	h.Handler = h.LoggingMw(mux)
-	h.Handler = otelhttp.NewHandler(h.Handler, "blog-handler")
 	return &h, nil
 }
 
@@ -56,7 +52,7 @@ type Metadata struct {
 }
 
 type ListArticlesResponse struct {
-	Data []*Metadata `json:"data,omitempty"`
+	Data []*Metadata `json:"data"`
 }
 
 func toMetadata(md *blog.Metadata) *Metadata {
@@ -105,6 +101,7 @@ func (h *Handler) GetArticles() http.HandlerFunc {
 		h.respond(w, r, response)
 	}
 }
+
 func (h *Handler) respond(w http.ResponseWriter, r *http.Request, data any) {
 	if err, ok := data.(error); ok {
 		var code int
@@ -127,36 +124,28 @@ func (h *Handler) respond(w http.ResponseWriter, r *http.Request, data any) {
 			code = http.StatusInternalServerError
 			detail = "internal server error"
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(code)
-		if err := json.MarshalWrite(w, ErrorResponse{
+		if err := h.encode(w, code, ErrorResponse{
 			Errors: []Error{NewError(code, detail)},
 		}); err != nil {
-			h.logger.Error("failed to write response", "error", err)
+			h.logger.Error("failed to write response", "error", err, slog.Group("http.request", "method", r.Method, "url", r.URL, "proto", r.Proto, "remote_addr", r.RemoteAddr))
+			w.WriteHeader(http.StatusInternalServerError)
 		}
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	if err := json.MarshalWrite(w, data); err != nil {
-		h.logger.Error("failed to write response", "error", err)
+	if err := h.encode(w, http.StatusOK, data); err != nil {
+		h.logger.Error("failed to write response", "error", err, slog.Group("http.request", "method", r.Method, "url", r.URL, "proto", r.Proto, "remote_addr", r.RemoteAddr))
 	}
 }
 
-// LoggingMw records method, path, peer, protocol, duration, and response status
-// after each request completes.
-func (h *Handler) LoggingMw(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-		m := httpsnoop.CaptureMetrics(next, w, r)
-
-		h.logger.InfoContext(r.Context(), "http request completed", slog.Group("http_request",
-			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
-			slog.String("remote_addr", r.RemoteAddr),
-			slog.String("proto", r.Proto),
-			slog.Duration("duration", m.Duration),
-			slog.Int("status", m.Code),
-		))
-	})
+func (h *Handler) encode[T any](w http.ResponseWriter, status int, data T) error {
+	resp, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if _, err := w.Write(resp); err != nil {
+		return err
+	}
+	return nil
 }
